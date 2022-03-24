@@ -176,8 +176,11 @@ use function React\Promise\resolve;
  * await($promise);
  * ```
  *
- * @param callable $function
- * @return callable(mixed ...): PromiseInterface<mixed>
+ * @template T
+ * @template TFulfilled as PromiseInterface<T>|T
+ * @template A
+ * @param (callable(): TFulfilled)|(callable(A): TFulfilled) $function
+ * @return callable(mixed ...$args): PromiseInterface<T>
  * @since 4.0.0
  * @see coroutine()
  */
@@ -268,8 +271,9 @@ function async(callable $function): callable
  * }
  * ```
  *
- * @param PromiseInterface $promise
- * @return mixed returns whatever the promise resolves to
+ * @template T
+ * @param PromiseInterface<T> $promise
+ * @return T
  * @throws \Exception when the promise is rejected with an `Exception`
  * @throws \Throwable when the promise is rejected with a `Throwable`
  * @throws \UnexpectedValueException when the promise is rejected with an unexpected value (Promise API v1 or v2 only)
@@ -279,6 +283,10 @@ function await(PromiseInterface $promise): mixed
     $fiber = null;
     $resolved = false;
     $rejected = false;
+
+    /**
+     * @var T $resolvedValue
+     */
     $resolvedValue = null;
     $rejectedThrowable = null;
     $lowLevelFiber = \Fiber::getCurrent();
@@ -292,6 +300,9 @@ function await(PromiseInterface $promise): mixed
             /** @var ?\Fiber<mixed,mixed,mixed,mixed> $fiber */
             if ($fiber === null) {
                 $resolved = true;
+                /**
+                 * @var T $resolvedValue
+                 */
                 $resolvedValue = $value;
                 return;
             }
@@ -305,7 +316,7 @@ function await(PromiseInterface $promise): mixed
 
             if (!$throwable instanceof \Throwable) {
                 $throwable = new \UnexpectedValueException(
-                    'Promise rejected with unexpected value of type ' . (is_object($throwable) ? get_class($throwable) : gettype($throwable))
+                    'Promise rejected with unexpected value of type ' . (is_object($throwable) ? get_class($throwable) : gettype($throwable)) /** @phpstan-ignore-line */
                 );
 
                 // avoid garbage references by replacing all closures in call stack.
@@ -354,7 +365,11 @@ function await(PromiseInterface $promise): mixed
 
     $fiber = FiberFactory::create();
 
-    return $fiber->suspend();
+    /**
+     * @var T $result
+     */
+    $result = $fiber->suspend();
+    return $result;
 }
 
 /**
@@ -592,10 +607,11 @@ function delay(float $seconds): void
  * });
  * ```
  *
- * @param callable(mixed ...$args):(\Generator<mixed,PromiseInterface,mixed,mixed>|mixed) $function
+ * @template T
+ * @template A
+ * @param callable(mixed ...$args):(\Generator<mixed,PromiseInterface<A>,mixed,T>|T) $function
  * @param mixed ...$args Optional list of additional arguments that will be passed to the given `$function` as is
- * @return PromiseInterface<mixed>
- * @since 3.0.0
+ * @return PromiseInterface<T>
  */
 function coroutine(callable $function, mixed ...$args): PromiseInterface
 {
@@ -609,9 +625,9 @@ function coroutine(callable $function, mixed ...$args): PromiseInterface
         return resolve($generator);
     }
 
+    /** @var ?PromiseInterface<T> $promise */
     $promise = null;
     $deferred = new Deferred(function () use (&$promise) {
-        /** @var ?PromiseInterface $promise */
         if ($promise instanceof PromiseInterface && \method_exists($promise, 'cancel')) {
             $promise->cancel();
         }
@@ -632,7 +648,7 @@ function coroutine(callable $function, mixed ...$args): PromiseInterface
             return;
         }
 
-        /** @var mixed $promise */
+        /** @var mixed|PromiseInterface<T> $promise */
         $promise = $generator->current();
         if (!$promise instanceof PromiseInterface) {
             $next = null;
@@ -660,12 +676,13 @@ function coroutine(callable $function, mixed ...$args): PromiseInterface
 }
 
 /**
- * @param iterable<callable():PromiseInterface<mixed>> $tasks
- * @return PromiseInterface<array<mixed>>
+ * @template T
+ * @param iterable<callable():PromiseInterface<T>> $tasks
+ * @return PromiseInterface<array<T>>
  */
 function parallel(iterable $tasks): PromiseInterface
 {
-    /** @var array<int,PromiseInterface> $pending */
+    /** @var array<int,PromiseInterface<T>> $pending */
     $pending = [];
     $deferred = new Deferred(function () use (&$pending) {
         foreach ($pending as $promise) {
@@ -720,14 +737,15 @@ function parallel(iterable $tasks): PromiseInterface
 }
 
 /**
- * @param iterable<callable():PromiseInterface<mixed>> $tasks
- * @return PromiseInterface<array<mixed>>
+ * @template T
+ * @param iterable<callable():PromiseInterface<T>> $tasks
+ * @return PromiseInterface<array<T>>
  */
 function series(iterable $tasks): PromiseInterface
 {
     $pending = null;
     $deferred = new Deferred(function () use (&$pending) {
-        /** @var ?PromiseInterface $pending */
+        /** @var ?PromiseInterface<T> $pending */
         if ($pending instanceof PromiseInterface && \method_exists($pending, 'cancel')) {
             $pending->cancel();
         }
@@ -774,14 +792,15 @@ function series(iterable $tasks): PromiseInterface
 }
 
 /**
- * @param iterable<(callable():PromiseInterface<mixed>)|(callable(mixed):PromiseInterface<mixed>)> $tasks
- * @return PromiseInterface<mixed>
+ * @template T
+ * @param iterable<(callable():PromiseInterface<T>)|(callable(mixed):PromiseInterface<T>)> $tasks
+ * @return PromiseInterface<T>
  */
 function waterfall(iterable $tasks): PromiseInterface
 {
     $pending = null;
     $deferred = new Deferred(function () use (&$pending) {
-        /** @var ?PromiseInterface $pending */
+        /** @var ?PromiseInterface<T> $pending */
         if ($pending instanceof PromiseInterface && \method_exists($pending, 'cancel')) {
             $pending->cancel();
         }
